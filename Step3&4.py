@@ -1,3 +1,7 @@
+"""
+Author: Carter Young
+Date: 2/09/2024
+"""
 from Step2 import calculate_amat
 
 
