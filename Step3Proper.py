@@ -4,15 +4,13 @@ Author: Ethan Avila, Carter Young
 Date: ___
 
 Description:
-This file is supposed to implement the 5th step of our CS429 project where
-we implement an L1 Instruction and Data cache and an L2 shared cache
-We aim to simulate this by creating 3 instances of the writeback cache class Carter made
-in the previous steps
-Additionally, we'll need to calculate, in cycles...
-AMAT = 1 + L1Miss * (10 + L2Miss * 100)
+This file is supposed to separate the steps 3&4 file Carter made
 
-We'll collect info on set associativities for 1, 4, 16, 64, 128 for all 3 trace files
+I believe Carter did correctly implement the write-back cache.
+However, the project specs seem to imply that the two steps should be separated
 """
+
+import Step1
 
 
 class BaseCache:
@@ -98,34 +96,34 @@ class WriteBackCache(BaseCache):
         self.write_backs += 1  # Increment when we wb
 
 
-"""
-def process_trace_with_write_back(file_path, cache_size=1024, block_size=32):
+# ----------------------------------------------------------
+
+def process_file(file_path, cache):
+    with open(file_path, 'r') as file:
+        for line in file:
+            operation, address = line.strip(). split()
+            cache.access_cache(int(operation), address)
+
+def simulate_caches(file_path, cache_size=1024, block_size=32, H=1, M=100):
     assoc = [1, 2, 4, 8, 16, 32]
-    H = 1  # Hit time in cycles
-    M = 100  # Miss penalty in cycles
-
     for assoc in assoc:
-        # Init instruction and data caches
-        instruction_cache = WriteBackCache(cache_size, block_size, assoc)
-        data_cache = WriteBackCache(cache_size, block_size, assoc)
-        total_accesses = 0
+        # init cache
+        myCache = WriteBackCache(cache_size, block_size, assoc)
 
-        with open(file_path, 'r') as file:
-            for line in file:
-                operation, address = line.strip().split()
-                operation = int(operation)
-                if operation == 2:  # Instruction read
-                    instruction_cache.access_cache(operation, address)
-                elif operation in (0, 1):  # Data r/w
-                    data_cache.access_cache(operation, address)
-                total_accesses += 1
+        # process the simulation
+        process_file(file_path, myCache)
 
-        # Calc and print stats for each cache
-        instruction_amat = calculate_amat(instruction_cache, H, M)
-        data_amat = calculate_amat(data_cache, H, M)
-        print(
-            f"Set Associativity {assoc}: Instruction Cache AMAT = {instruction_amat}, Data Cache AMAT = {data_amat}, Write Backs = {instruction_cache.write_backs + data_cache.write_backs}")
-"""
+        # calculate the AMAT
+        myAMAT = calculate_amat(myCache, H, M)
+
+        # print stuff
+        print(f"Set Associativity is {assoc}")
+        print(f"AMAT is {myAMAT}")
+        print(f"I got {myCache.hits} Hits and missed {myCache.misses} times! \n")
+
+def calculate_amat(cache, H, M):
+    miss_rate = cache.misses / (cache.hits + cache.misses) if (cache.hits + cache.misses) > 0 else 0
+    return H + (miss_rate * M)
 
 file_path = "traces/cc.trace"
-# process_trace_with_write_back(file_path)
+simulate_caches(file_path)
