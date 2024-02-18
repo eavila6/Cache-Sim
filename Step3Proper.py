@@ -62,9 +62,9 @@ class WriteBackCache(BaseCache):
         for block in cache_set:
             if block['valid'] and block['tag'] == tag:
                 self.update_LRU(set_index, block)
-                return True  # If hit
+                return True  # hit
         self.load_block_to_cache(set_index, tag, is_write=False)
-        return False  # If miss
+        return False  # miss
 
     def write_data(self, set_index, tag):
         cache_set = self.cache[set_index]
