@@ -80,7 +80,7 @@ class CacheSimulation:
         l2Cache = WriteThroughCache(16384, 128, associativity)
 
         # Track hits and misses
-        i_hits, i_misses, d_hits, d_misses, 2hit, 2miss = 0, 0, 0, 0, 0 , 0
+        i_hits, i_misses, d_hits, d_misses, thit, tmiss = 0, 0, 0, 0, 0, 0
 
         for line in trace_lines:
             reference_type, address = line  # Directly unpack the tuple
@@ -91,6 +91,17 @@ class CacheSimulation:
                     i_hits += 1
                 else:
                     i_misses += 1
+
+                    # first, check L2 cache if instruction is there
+                    # if instruction is in L2 cache, load into i_cache
+                    # if not, store instruction to L2 cache
+                    if l2Cache.read(address):
+                        thit += 1
+                        i_cache.write(address)
+                    else:
+                        l2Cache.write(address)
+                        tmiss += 1
+
             else:  # Data read/write
                 if reference_type == 1:  # Data write
                     d_cache.write(address)  # Write operation
@@ -101,18 +112,34 @@ class CacheSimulation:
                     else:
                         d_misses += 1  # If it does not exist in d-cache, miss
 
+                        # same as the i_cache process
+                        # first, check L2 cache if data is there
+                        # if instruction is in L2 cache, load into d_cache
+                        # if not, store data to L2 cache
+                        if l2Cache.read(address):
+                            thit += 1
+                            d_cache.write(address)
+                        else:
+                            l2Cache.write(address)
+                            tmiss += 1
+
         # Return hits and misses along with AMAT
         i_miss_rate = i_misses / (i_hits + i_misses) if (i_hits + i_misses) > 0 else 0  # calc miss rate for i-cache
         d_miss_rate = d_misses / (d_hits + d_misses) if (d_hits + d_misses) > 0 else 0  # calc miss rate for d-cache
+        l2MissRate = tmiss / (thit + tmiss) if (thit + tmiss) > 0 else 0 # calculating miss rate for l2 cache
 
         # Return hit rate
         i_hit_rate = 1 - i_miss_rate
         d_hit_rate = 1 - d_miss_rate
+        l2HitRate = 1 - l2MissRate
 
         i_amat = self.H + (i_miss_rate * self.M)  # calc i-amat according to project desc.
         d_amat = self.H + (d_miss_rate * self.M)  # calc d-amat according to project desc.
 
-        return (i_hits, i_misses, d_hits, d_misses, i_hit_rate, d_hit_rate, i_amat, d_amat)
+        amat = 1 + ( (i_miss_rate + d_miss_rate)/2 ) * (10 + l2MissRate * 100)
+        print(f"thit: {thit}, tmiss: {tmiss}, L2MissRate: {l2MissRate}, L2HitRate: {l2HitRate}, amat: {amat}")
+
+        return (i_hits, i_misses, d_hits, d_misses, thit, tmiss, i_hit_rate, d_hit_rate, l2HitRate, i_amat, d_amat, amat)
 
     def run_simulation(self, trace_name):
         # Run sims and write to CSV
@@ -121,13 +148,13 @@ class CacheSimulation:
         csv_filename = f"WTResults/{trace_name}_wt.csv"
 
         with open(csv_filename, 'w', newline='') as csvfile:
-            fieldnames = ['Assoc.', 'L1I accesses', 'L1I misses', 'L1D accesses', 'L1D misses', 'L1I hit rate',
-                          'L1D hit rate', 'L1I AMAT', 'L1D AMAT']
+            fieldnames = ['Assoc.', 'L1I accesses', 'L1I misses', 'L1D accesses', 'L1D misses', 'L2 accesses', 'L2 misses', 'L1I hit rate',
+                          'L1D hit rate', 'L2 hit rate','L1I AMAT', 'L1D AMAT', 'L2 AMAT']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for assoc in associativities:
-                i_hits, i_misses, d_hits, d_misses, i_hit_rate, d_hit_rate, i_amat, d_amat = self.simulate_trace(assoc, trace_lines)
+                i_hits, i_misses, d_hits, d_misses, thit, tmiss, i_hit_rate, d_hit_rate, l2HitRate, i_amat, d_amat, amat = self.simulate_trace(assoc, trace_lines)
 
                 writer.writerow({
                     'Assoc.': assoc,
@@ -135,10 +162,14 @@ class CacheSimulation:
                     'L1I misses': i_misses,
                     'L1D accesses': d_hits,
                     'L1D misses': d_misses,
+                    'L2 accesses':thit,
+                    'L2 misses': tmiss,
                     'L1I hit rate': f"{i_hit_rate:.4f}",
                     'L1D hit rate': f"{d_hit_rate:.4f}",
+                    'L2 hit rate': f"{l2HitRate: .4f}",
                     'L1I AMAT': f"{i_amat:.2f}",
-                    'L1D AMAT': f"{d_amat:.2f}"
+                    'L1D AMAT': f"{d_amat:.2f}",
+                    'L2 AMAT': f"{amat:.2f}"
                 })
 
         print(f"Results have been written to {csv_filename}")
@@ -157,3 +188,8 @@ def read_trace_file(file_path):
                 address = int(address_hex, 16)  # Convert hex address to integer
                 trace_lines.append((reference_type, address))
     return trace_lines
+
+filename = 'spice'  # Write 'cc', 'spice', or 'tex' here to change trace
+trace_lines = read_trace_file(f"traces/{filename}.trace")
+simulation = CacheSimulation()
+csv_file = simulation.run_simulation(filename)
