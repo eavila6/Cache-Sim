@@ -1,131 +1,195 @@
+import csv
 """
-Author: Ethan Avila, Carter Young
+Authors: EAVI, Carter Young
 
-Date: ___
-
-Description:
-This file is supposed to implement the 5th step of our CS429 project where
-we implement an L1 Instruction and Data cache and an L2 shared cache
-We aim to simulate this by creating 3 instances of the writeback cache class Carter made
-in the previous steps
-Additionally, we'll need to calculate, in cycles...
-AMAT = 1 + L1Miss * (10 + L2Miss * 100)
-
-We'll collect info on set associativities for 1, 4, 16, 64, 128 for all 3 trace files
+Incorporate the L2 cache and write output to a new file step5Results
+A storage file
 """
 
+class WriteThroughCache:
+    def __init__(self, total_size_bytes, block_size_bytes, blocks_per_set):
+        # Constructor for the WriteThroughCache class that initializes the cache with the given size,
+        # block size, and blocks per set. Also calculates the number of sets and initializes the cache data structure.
+        self.total_size_bytes = total_size_bytes
+        self.block_size_bytes = block_size_bytes
+        self.blocks_per_set = blocks_per_set
+        self.sets = total_size_bytes // (block_size_bytes * blocks_per_set)
+        self.cache = self._create_cache()
+        self.access_sequence = 0  # To manage LRU policy
 
-class BaseCache:
-    def __init__(self, cache_size, block_size, set_assoc):
-        # Define all requisite parameters
-        self.cache_size = cache_size
-        self.block_size = block_size
-        self.set_assoc = set_assoc
-        self.num_sets = self.cache_size // (self.block_size * self.set_assoc)
-        self.cache = self.initialize_cache()
+    def _create_cache(self):
+        # Initializes cache with sets, each containing blocks with a valid bit, tag, and LRU counter
+        return [[{'valid': False, 'tag': None, 'lru_counter': 0} for _ in range(self.blocks_per_set)] for _ in range(self.sets)]
 
-    def initialize_cache(self):
-        # Init cache based on size, block size, set_assoc
-        cache = []
-        for _ in range(self.num_sets):
-            sets = [{'valid': False, 'tag': None, 'LRU': 0, 'dirty': False} for _ in range(self.set_assoc)]
-            cache.append(sets)
-        return cache
+    def _get_set_and_tag(self, address):
+        # Computes set index and tag based on the given memory address
+        set_index = (address // self.block_size_bytes) % self.sets
+        tag = address // (self.block_size_bytes * self.sets)
+        return set_index, tag
 
-    def update_LRU(self, set_index, accessed_block):
-        # Increment LRU for all blocks
+    def read(self, address):
+        # Updates LRU counter on hit, calls load_block to fetch and load block if miss
+        set_index, tag = self._get_set_and_tag(address)
         for block in self.cache[set_index]:
-            block['LRU'] += 1
-        accessed_block['LRU'] = 0  # Reset LRU for accessed block
-
-    def get_set_index_and_tag(self, address):
-        address_int = int(address, 16)
-        index = (address_int // self.block_size) % self.num_sets
-        tag = address_int // (self.block_size * self.num_sets)
-        return index, tag
-
-
-class WriteBackCache(BaseCache):
-    def __init__(self, cache_size, block_size, set_assoc):
-        super().__init__(cache_size, block_size, set_assoc)
-        self.write_backs = 0
-        self.hits = 0
-        self.misses = 0
-
-    def access_cache(self, operation, address):
-        set_index, tag = self.get_set_index_and_tag(address)
-        if operation == 0:  # Data read
-            self.read_data(set_index, tag)
-        elif operation == 1:  # Data write
-            self.write_data(set_index, tag)
-
-    def read_data(self, set_index, tag):
-        cache_set = self.cache[set_index]
-        for block in cache_set:
             if block['valid'] and block['tag'] == tag:
-                self.update_LRU(set_index, block)
-                return True  # If hit
-        self.load_block_to_cache(set_index, tag, is_write=False)
-        return False  # If miss
-
-    def write_data(self, set_index, tag):
-        cache_set = self.cache[set_index]
-        for block in cache_set:
-            if block['valid'] and block['tag'] == tag:
-                block['dirty'] = True  # Mark block as dirty
-                self.update_LRU(set_index, block)
-                self.hits += 1
+                block['lru_counter'] = self.access_sequence
+                self.access_sequence += 1
                 return True  # Hit
-        if self.load_block_to_cache(set_index, tag, is_write=True):
-            self.hits += 1
-        else:
-            self.misses += 1
-        return False  # Miss
+        # Miss: Load the block into the cache
+        self.load_block(set_index, tag)
+        return False
 
-    def load_block_to_cache(self, set_index, tag, is_write):
-        lru_block = min(self.cache[set_index], key=lambda x: x['LRU'])
-        if lru_block['valid'] and lru_block['dirty']:
-            self.write_back(lru_block)
-            self.misses += 1
-        else:
-            pass
-        lru_block.update({'valid': True, 'tag': tag, 'LRU': 0, 'dirty': is_write})
-        return not lru_block['dirty']
+    def write(self, address):
+        # Writes through to main. Updates LRU if block is in cache. Else, load into cache.
+        set_index, tag = self._get_set_and_tag(address)
+        block_loaded = False
+        for block in self.cache[set_index]:
+            if block['tag'] == tag:
+                block['lru_counter'] = self.access_sequence
+                block_loaded = True
+                break
+        if not block_loaded:
+            self.load_block(set_index, tag)
+        # Write-through cache: Assume write to main memory here
+        self.access_sequence += 1
+        return False  # Always count as a miss for write
 
-    def write_back(self, block):
-        # Simulate writing block back to main mem
-        block['dirty'] = False
-        self.write_backs += 1  # Increment when we wb
+    def load_block(self, set_index, tag):
+        # Finds the LRU block to replace
+        lru_block = min(self.cache[set_index], key=lambda x: x['lru_counter'])
+        lru_block['valid'] = True
+        lru_block['tag'] = tag
+        lru_block['lru_counter'] = self.access_sequence
+
+class CacheSimulation:
+    def __init__(self, total_size_bytes=1024, block_size_bytes=32, H=1, M=100):
+        # Initializes sim with default cache and block size, as well as hit time and miss penalty
+        self.total_size_bytes = total_size_bytes
+        self.block_size_bytes = block_size_bytes
+        self.H = H
+        self.M = M
+
+    def simulate_trace(self, associativity, trace_lines):
+        """ Sims cache given associativity for the passed traces.
+            Processes each mem access in trace, calcs hits/misses, hit rates, AMAT.
+        """
+        # Create caches
+        # hard coding some consts for the caches
+        i_cache = WriteThroughCache(self.total_size_bytes, self.block_size_bytes, 2)
+        d_cache = WriteThroughCache(self.total_size_bytes, self.block_size_bytes, 2)
+        l2Cache = WriteThroughCache(16384, 128, associativity)
+
+        # Track hits and misses
+        i_hits, i_misses, d_hits, d_misses, thit, tmiss = 0, 0, 0, 0, 0, 0
+
+        for line in trace_lines:
+            reference_type, address = line  # Directly unpack the tuple
+
+            # Determine cache and action
+            if reference_type == 2:  # Instruction read
+                if i_cache.read(address):
+                    i_hits += 1
+                else:
+                    i_misses += 1
+
+                    # first, check L2 cache if instruction is there
+                    # if instruction is in L2 cache, load into i_cache
+                    # if not, store instruction to L2 cache
+                    if l2Cache.read(address):
+                        thit += 1
+                        i_cache.write(address)
+                    else:
+                        l2Cache.write(address)
+                        tmiss += 1
+
+            else:  # Data read/write
+                if reference_type == 1:  # Data write
+                    d_cache.write(address)  # Write operation
+                    d_misses += 1  # Write is always a miss
+                else:  # Data read
+                    if d_cache.read(address):
+                        d_hits += 1  # If it exists in d-cache, hit
+                    else:
+                        d_misses += 1  # If it does not exist in d-cache, miss
+
+                        # same as the i_cache process
+                        # first, check L2 cache if data is there
+                        # if instruction is in L2 cache, load into d_cache
+                        # if not, store data to L2 cache
+                        if l2Cache.read(address):
+                            thit += 1
+                            d_cache.write(address)
+                        else:
+                            l2Cache.write(address)
+                            tmiss += 1
+
+        # Return hits and misses along with AMAT
+        i_miss_rate = i_misses / (i_hits + i_misses) if (i_hits + i_misses) > 0 else 0  # calc miss rate for i-cache
+        d_miss_rate = d_misses / (d_hits + d_misses) if (d_hits + d_misses) > 0 else 0  # calc miss rate for d-cache
+        l2MissRate = tmiss / (thit + tmiss) if (thit + tmiss) > 0 else 0 # calculating miss rate for l2 cache
+
+        # Return hit rate
+        i_hit_rate = 1 - i_miss_rate
+        d_hit_rate = 1 - d_miss_rate
+        l2HitRate = 1 - l2MissRate
+
+        i_amat = self.H + (i_miss_rate * self.M)  # calc i-amat according to project desc.
+        d_amat = self.H + (d_miss_rate * self.M)  # calc d-amat according to project desc.
+
+        amat = 1 + ( (i_miss_rate + d_miss_rate)/2 ) * (10 + l2MissRate * 100)
+        print(f"thit: {thit}, tmiss: {tmiss}, L2MissRate: {l2MissRate}, L2HitRate: {l2HitRate}, amat: {amat}")
+
+        return (i_hits, i_misses, d_hits, d_misses, thit, tmiss, i_hit_rate, d_hit_rate, l2HitRate, i_amat, d_amat, amat)
+
+    def run_simulation(self, trace_name):
+        # Run sims and write to CSV
+        associativities = [1, 2, 4, 8, 16, 32]
+        trace_file_path = f"traces/{trace_name}.trace"
+        csv_filename = f"WTResults/{trace_name}_wt.csv"
+
+        with open(csv_filename, 'w', newline='') as csvfile:
+            fieldnames = ['Assoc.', 'L1I accesses', 'L1I misses', 'L1D accesses', 'L1D misses', 'L2 accesses', 'L2 misses', 'L1I hit rate',
+                          'L1D hit rate', 'L2 hit rate','L1I AMAT', 'L1D AMAT', 'L2 AMAT']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for assoc in associativities:
+                i_hits, i_misses, d_hits, d_misses, thit, tmiss, i_hit_rate, d_hit_rate, l2HitRate, i_amat, d_amat, amat = self.simulate_trace(assoc, trace_lines)
+
+                writer.writerow({
+                    'Assoc.': assoc,
+                    'L1I accesses': i_hits,
+                    'L1I misses': i_misses,
+                    'L1D accesses': d_hits,
+                    'L1D misses': d_misses,
+                    'L2 accesses':thit,
+                    'L2 misses': tmiss,
+                    'L1I hit rate': f"{i_hit_rate:.4f}",
+                    'L1D hit rate': f"{d_hit_rate:.4f}",
+                    'L2 hit rate': f"{l2HitRate: .4f}",
+                    'L1I AMAT': f"{i_amat:.2f}",
+                    'L1D AMAT': f"{d_amat:.2f}",
+                    'L2 AMAT': f"{amat:.2f}"
+                })
+
+        print(f"Results have been written to {csv_filename}")
+        return csv_filename
 
 
-"""
-def process_trace_with_write_back(file_path, cache_size=1024, block_size=32):
-    assoc = [1, 2, 4, 8, 16, 32]
-    H = 1  # Hit time in cycles
-    M = 100  # Miss penalty in cycles
+def read_trace_file(file_path):
+    """ Reads a trace file and returns a list of (reference_type, address) tuples. """
+    trace_lines = []
+    with open(file_path, 'r') as file:
+        for line in file:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                reference_type, address_hex = parts
+                reference_type = int(reference_type)
+                address = int(address_hex, 16)  # Convert hex address to integer
+                trace_lines.append((reference_type, address))
+    return trace_lines
 
-    for assoc in assoc:
-        # Init instruction and data caches
-        instruction_cache = WriteBackCache(cache_size, block_size, assoc)
-        data_cache = WriteBackCache(cache_size, block_size, assoc)
-        total_accesses = 0
-
-        with open(file_path, 'r') as file:
-            for line in file:
-                operation, address = line.strip().split()
-                operation = int(operation)
-                if operation == 2:  # Instruction read
-                    instruction_cache.access_cache(operation, address)
-                elif operation in (0, 1):  # Data r/w
-                    data_cache.access_cache(operation, address)
-                total_accesses += 1
-
-        # Calc and print stats for each cache
-        instruction_amat = calculate_amat(instruction_cache, H, M)
-        data_amat = calculate_amat(data_cache, H, M)
-        print(
-            f"Set Associativity {assoc}: Instruction Cache AMAT = {instruction_amat}, Data Cache AMAT = {data_amat}, Write Backs = {instruction_cache.write_backs + data_cache.write_backs}")
-"""
-
-file_path = "traces/cc.trace"
-# process_trace_with_write_back(file_path)
+filename = 'spice'  # Write 'cc', 'spice', or 'tex' here to change trace
+trace_lines = read_trace_file(f"traces/{filename}.trace")
+simulation = CacheSimulation()
+csv_file = simulation.run_simulation(filename)
