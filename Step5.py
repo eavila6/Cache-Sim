@@ -137,7 +137,7 @@ class CacheSimulation:
         d_amat = self.H + (d_miss_rate * self.M)  # calc d-amat according to project desc.
 
         amat = 1 + ( (i_miss_rate + d_miss_rate)/2 ) * (10 + l2MissRate * 100)
-        print(f"thit: {thit}, tmiss: {tmiss}, L2MissRate: {l2MissRate}, L2HitRate: {l2HitRate}, amat: {amat}")
+        # print(f"thit: {thit}, tmiss: {tmiss}, L2MissRate: {l2MissRate}, L2HitRate: {l2HitRate}, amat: {amat}")
 
         return (i_hits, i_misses, d_hits, d_misses, thit, tmiss, i_hit_rate, d_hit_rate, l2HitRate, i_amat, d_amat, amat)
 
